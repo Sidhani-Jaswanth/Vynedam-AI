@@ -112,4 +112,17 @@ async function me(req, res) {
   }
 }
 
-module.exports = { signup, login, me };
+async function oauthCallback(req, res) {
+  try {
+    if (!req.user) {
+      return res.redirect("http://localhost:3000/auth/error");
+    }
+    const token = signToken(req.user._id);
+    return res.redirect(`http://localhost:3000/auth/success?token=${token}`);
+  } catch (error) {
+    console.error("OAuth callback error:", error.message);
+    return res.redirect("http://localhost:3000/auth/error");
+  }
+}
+
+module.exports = { signup, login, me, oauthCallback };

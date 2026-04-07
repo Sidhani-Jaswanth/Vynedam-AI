@@ -1,52 +1,11 @@
-const { generateWithFallback, generatePreviewFromResponse } = require("../services/ai.service");
-
-function isProjectPrompt(text) {
-  const value = String(text || "").toLowerCase();
-  const explicitBuildIntent = /(build|create|make|generate|develop|code|give|show|design|provide)/.test(value);
-  const projectTargets = /(project|website|web\s*page|page|web app|webapp|landing page|frontend|backend|api|react|next\.?js|full\s*stack|index\.html|html page|landing)/.test(value);
-  const implicitProjectAsk = /(basic|simple|minimal|welcome|portfolio|homepage|home page).*(website|web\s*page|html\s*page|landing\s*page|page)/.test(value);
-  return (explicitBuildIntent && projectTargets) || implicitProjectAsk || /(website|web\s*page|html\s*page|landing\s*page)/.test(value);
-}
-
-function looksLikeProjectOutput(text) {
-  const value = String(text || "");
-  return /(project\s*name|file\s*tree|run\s*steps|index\.html|```html|```css|```javascript|npm\s+install|npm\s+run\s+dev|yarn\s+dev)/i.test(value);
-}
-
-function isCasualPrompt(text) {
-  const value = String(text || "").trim().toLowerCase();
-  if (!value) return false;
-  const simpleGreeting = /^(hi|hello|hey|yo|hola|sup|gm|good\s*morning|good\s*afternoon|good\s*evening)(\s+(there|bro|buddy|assistant|bot))?([!.?\s]+)?$/.test(value);
-  const simpleSmallTalk = /^(how\s+are\s+you|what'?s\s+up|whats\s+up|are\s+you\s+there)([!.?\s]+)?$/.test(value);
-  const simpleAck = /^(ok|okay|k|cool|nice|great|awesome|thanks|thank\s+you|thx|got\s*it)(\s+(bro|buddy|assistant|bot|man|mate))?([!.?\s]+)?$/.test(value);
-  return simpleGreeting || simpleSmallTalk || simpleAck;
-}
-
-function isConversationalQuestion(text) {
-  const value = String(text || "").trim().toLowerCase();
-  if (!value) return false;
-  return /^(why|how|what|when|where|who)\b/.test(value) || /(explain|describe|summari[sz]e|review|what\s+does\s+this|how\s+does\s+this)/.test(value);
-}
-
-function normalizeMessages(rawMessages) {
-  if (!Array.isArray(rawMessages)) return [];
-  return rawMessages
-    .slice(-20)
-    .map((m) => ({
-      role: String(m?.role || "").toLowerCase(),
-      content: String(m?.content || "").trim(),
-    }))
-    .filter((m) => (m.role === "user" || m.role === "assistant") && m.content);
-}
-
-function hasProjectContext(messages) {
-  const text = messages.map((m) => m.content).join("\n").toLowerCase();
-  return /(project\s*name|file\s*tree|run\s*steps|index\.html|```html|```css|```javascript|website|web\s*app)/.test(text);
-}
+const { callAiProvider, validateProjectJson } = require("../services/ai.orchestrator");
+const projectService = require("../services/project.service");
+const logger = require("../config/logger");
+const env = require("../config/env");
 
 async function generate(req, res) {
   try {
-    const { prompt, messages } = req.body || {};
+    const { prompt } = req.body || {};
     if (!prompt || typeof prompt !== "string") {
       return res.status(400).json({ error: "prompt is required" });
     }
@@ -57,26 +16,53 @@ async function generate(req, res) {
       return res.status(400).json({ error: "prompt is too long" });
     }
 
-    const normalizedMessages = normalizeMessages(messages);
-    const casualPrompt = isCasualPrompt(cleanPrompt);
-    const conversationalQuestion = isConversationalQuestion(cleanPrompt);
-    const result = await generateWithFallback(cleanPrompt, normalizedMessages);
-    const projectOutput = looksLikeProjectOutput(result);
-    const projectPrompt = !casualPrompt && !conversationalQuestion && (projectOutput || isProjectPrompt(cleanPrompt) || hasProjectContext(normalizedMessages));
+    let projectJson;
+    try {
+      projectJson = await callAiProvider(cleanPrompt, 1);
+      validateProjectJson(projectJson);
+    } catch (err) {
+      logger.error({ err: err.message }, "AI JSON generation failed");
+      return res.status(502).json({ error: "Failed to generate a valid project structure. Please try again." });
+    }
 
-    // Preview/download artifacts are only valid for project-like responses and non-casual prompts.
-    const preview = projectPrompt && projectOutput ? generatePreviewFromResponse(result, req) : null;
+    const files = projectJson.files;
+    
+    // Validate empty array
+    if (!files || files.length === 0) {
+      return res.status(502).json({ error: "AI generated empty files array" });
+    }
+
+    const entry = projectJson.entry || "index.html";
+    const entryExists = files.some(f => f.path.toLowerCase() === entry.toLowerCase() || (f.path.includes("/") && f.path.split("/").pop().toLowerCase() === entry.toLowerCase()));
+    
+    if (!entryExists) {
+      // If AI specified an entry that wasn't in the files array, force default to the first file.
+      // This ensures validation passes and preview is valid.
+      logger.warn({ entry }, "Entry file not matched in generated output. Proceeding anyway.");
+    }
+
+    const { projectId } = await projectService.createProject(files);
+    
+    // Generate preview URL
+    const previewBase = env.previewBaseUrl || "http://localhost:5000/preview";
+    const previewUrl = `${previewBase}/${projectId}/${entry}`;
+
+    // Ensure preview URL is structurally valid
+    if (!previewUrl || !previewUrl.startsWith("http")) {
+       return res.status(500).json({ error: "Internal server error mapping preview URL" });
+    }
 
     return res.status(200).json({
       success: true,
-      result,
-      previewUrl: preview?.previewUrl || null,
-      downloadUrl: preview?.downloadUrl || null,
+      projectId,
+      previewUrl,
+      files,
+      type: projectJson.type || "project"
     });
   } catch (error) {
-    console.error("Generate error:", error.message);
+    logger.error({ err: error.message }, "Generate controller error");
     return res.status(error.status || 500).json({
-      error: error.publicMessage || "Generation failed",
+      error: error.message || "Generation failed",
       requestId: req.requestId,
     });
   }

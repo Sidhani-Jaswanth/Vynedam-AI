@@ -21,6 +21,9 @@ module.exports = {
   useDb: process.env.USE_DB !== "false",
   mongoUri: process.env.MONGO_URI || "",
 
+  previewBasePath: process.env.PREVIEW_BASE_PATH || "generated_projects",
+  previewBaseUrl: process.env.PREVIEW_BASE_URL || "http://localhost:5000/preview",
+
   corsOrigin: process.env.CORS_ORIGIN || "",
   allowAllCors: toBool(process.env.ALLOW_ALL_CORS, false),
 

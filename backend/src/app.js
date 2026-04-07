@@ -21,7 +21,8 @@ const chatRoutes = require("./routes/chat.routes");
 const generateRoutes = require("./routes/generate.routes");
 
 const app = express();
-const PREVIEWS_DIR = path.join(process.cwd(), "generated-previews");
+const passport = require("./config/passport");
+const PREVIEWS_DIR = path.join(__dirname, "../", env.previewBasePath || "generated_projects");
 
 function normalizeOrigin(value) {
   return String(value || "").trim().replace(/\/$/, "").toLowerCase();
@@ -56,6 +57,7 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 app.use(xssProtection);
+app.use(passport.initialize());
 app.use((req, _res, next) => {
   if (req.body && typeof req.body === "object") mongoSanitize.sanitize(req.body);
   if (req.params && typeof req.params === "object") mongoSanitize.sanitize(req.params);
@@ -95,7 +97,7 @@ const generalLimiter = rateLimit({
 app.use(generalLimiter);
 
 const previewMiddlewares = env.previewRequireAuth ? [requireAccessToken] : [];
-app.use("/previews", ...previewMiddlewares, express.static(PREVIEWS_DIR));
+app.use("/preview", ...previewMiddlewares, express.static(PREVIEWS_DIR));
 app.get("/previews/:previewId/download", ...previewMiddlewares, (req, res) => {
   const { previewId } = req.params;
   if (!/^[0-9a-fA-F-]{36}$/.test(previewId)) {

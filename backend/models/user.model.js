@@ -19,7 +19,22 @@ const userSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: true,
+      required: false,
+    },
+    googleId: {
+      type: String,
+      sparse: true,
+      unique: true,
+    },
+    githubId: {
+      type: String,
+      sparse: true,
+      unique: true,
+    },
+    microsoftId: {
+      type: String,
+      sparse: true,
+      unique: true,
     },
     role: {
       type: String,
