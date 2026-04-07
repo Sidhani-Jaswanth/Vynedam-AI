@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+
+.env
+.env.*
+!.env.example
+
+backend/generated-previews/
+backend/.env.local
+backend/.env
+Frontend/.env
+
+Frontend/build/
+coverage/
+*.log
